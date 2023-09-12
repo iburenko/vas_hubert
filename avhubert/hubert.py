@@ -4,7 +4,8 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import os,sys
+import os, sys
+sys.path.append("/home/hpc/b105dc/b105dc10/st-gcn")
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -24,6 +25,8 @@ from fairseq.models.wav2vec.wav2vec2 import (
 )
 from fairseq.modules import GradMultiply, LayerNorm
 from copy import deepcopy
+
+from net.st_gcn import Model as STGCN
 
 DBG=True if len(sys.argv) == 1 else False
 
@@ -315,15 +318,18 @@ class AVHubertConfig(FairseqDataclass):
     no_scale_embedding: bool = field(default=True, metadata={'help': 'scale embedding'})
 
 class SubModel(nn.Module):
-    def __init__(self, resnet=None, input_dim=None, cfg=None):
+    def __init__(self, resnet=None, gcn=None, input_dim=None, cfg=None):
         super().__init__()
         self.resnet = resnet
+        self.gcn = gcn
         self.proj = nn.Linear(input_dim, cfg.encoder_embed_dim)
         self.encoder = TransformerEncoder(cfg) if cfg.encoder_layers > 0 else None
 
     def forward(self, x):
         if self.resnet is not None:
             x = self.resnet(x)
+        if self.gcn is not None:
+            x = self.gcn.extract_time_features(x)
         x = self.proj(x.transpose(1, 2))
         if self.encoder is not None:
             x = self.encoder(x)[0].transpose(1, 2)
@@ -347,14 +353,19 @@ class AVHubertModel(BaseFairseqModel):
         self.feat2tar_ratio = cfg.label_rate * feature_ds_rate / task_cfg.sample_rate
         sub_cfg = deepcopy(cfg)
         sub_cfg.encoder_layers = sub_cfg.sub_encoder_layers
-        resnet = ResEncoder(relu_type=cfg.resnet_relu_type, weights=cfg.resnet_weights)
+        self.modalities = cfg.input_modality.split("_")
+        if 'image' in self.modalities:
+            resnet = ResEncoder(relu_type=cfg.resnet_relu_type, weights=cfg.resnet_weights)
+            self.feature_extractor_video = SubModel(resnet=resnet, input_dim=resnet.backend_out, cfg=sub_cfg)
+        if 'skeleton' in self.modalities:
+            gcn = self.get_gcn()
+            self.feature_extractor_skeleton = SubModel(gcn=gcn, input_dim=256, cfg=sub_cfg)
         self.feature_extractor_audio = SubModel(resnet=None, input_dim=cfg.audio_feat_dim, cfg=sub_cfg)
-        self.feature_extractor_video = SubModel(resnet=resnet, input_dim=resnet.backend_out, cfg=sub_cfg)
         self.modality_dropout, self.audio_dropout = cfg.modality_dropout, cfg.audio_dropout
         self.modality_fuse = cfg.modality_fuse
         self.encoder_embed_dim = cfg.encoder_embed_dim
         if self.modality_fuse == 'concat':
-            self.embed = cfg.encoder_embed_dim * 2
+            self.embed = cfg.encoder_embed_dim * (len(self.modalities) + 1)
         elif self.modality_fuse == 'add':
             self.embed = cfg.encoder_embed_dim
         self.post_extract_proj = (
@@ -438,6 +449,18 @@ class AVHubertModel(BaseFairseqModel):
         kwargs = {}
         model = AVHubertModel(cfg, task.cfg, task.dictionaries, **kwargs)
         return model
+    
+    def get_gcn(self, num_class=256):
+        graph_args = {
+            "layout": "upper_body",
+            "strategy": "spatial"
+        }
+        return STGCN(
+            in_channels=3, 
+            num_class=10, 
+            edge_importance_weighting=True, 
+            graph_args=graph_args
+            )
 
     def apply_input_mask(self, x, padding_mask, target_list):
         B, C, T = x.shape[:3]
@@ -598,7 +621,7 @@ class AVHubertModel(BaseFairseqModel):
         output_layer: Optional[int] = None
     ) -> Dict[str, torch.Tensor]:
         """output layer is 1-based"""
-        src_audio, src_video = source['audio'], source['video']
+        src_audio, src_video, src_keypoints = source['audio'], source['video'], source['keypoints']
         if mask and self.masking_type == 'input':
             src_video, mask_indices_video = self.apply_input_mask(src_video, padding_mask, target_list)
             src_audio, mask_indices_audio = self.apply_input_mask(src_audio, padding_mask, target_list)
@@ -607,16 +630,29 @@ class AVHubertModel(BaseFairseqModel):
             src_audio, src_video, mask_indices = src_audio, src_video, None
 
         features_audio = self.forward_features(src_audio, modality='audio') # features: [B, F, T]
-        features_video = self.forward_features(src_video, modality='video')
+        if "image" in self.modalities:
+            features_video = self.forward_features(src_video, modality='video')
+        if "skeleton" in self.modalities:
+            features_keypoints = self.forward_features(src_keypoints, modality='skeleton')
+
         modality_drop_prob, audio_drop_prob = np.random.random(), np.random.random()
         if self.training:
             if modality_drop_prob < self.modality_dropout:
                 if audio_drop_prob < self.audio_dropout:
                     features_audio = 0 * features_audio
                 else:
-                    features_video = 0 * features_video
+                    if "image" in self.modalities:
+                        features_video = 0 * features_video
+                    if "skeleton" in self.modalities:
+                        features_keypoints = 0 * features_keypoints
+
         if self.modality_fuse == 'concat':
-            features = torch.cat([features_audio, features_video], dim=1)
+            if "image" in self.modalities and "skeleton" in self.modalities:
+                features = torch.cat([features_audio, features_video, features_keypoints], dim=1)
+            elif "image" in self.modalities:
+                features = torch.cat([features_audio, features_video], dim=1)
+            elif "skeleton" in self.modalities:
+                features = torch.cat([features_audio, features_keypoints], dim=1)
         elif self.modality_fuse == 'add':
             features = features_audio + features_video
         if target_list is not None:

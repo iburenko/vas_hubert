@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from dataclasses import dataclass, field
-from fairseq import metrics, search
+from fairseq.logging import metrics
+from fairseq import search
 from fairseq.data import Dictionary, encoders
 from fairseq.dataclass.configs import FairseqDataclass
 from fairseq.tasks import register_task
@@ -142,12 +143,12 @@ class AVHubertPretrainingConfig(FairseqDataclass):
     )
     image_aug: bool = field(default=False, metadata={'help': 'image data augmentation'})
     image_crop_size: int = field(
-        default=88, metadata={"help": "image ROI size"})
+        default=224, metadata={"help": "image ROI size"})
     image_mean: float = field(
         default=0.421, metadata={"help": "image mean"})
     image_std: float = field(
         default=0.165, metadata={"help": "image std"})
-    modalities: Optional[List[str]] = field(default_factory=lambda: ["audio", "video"], metadata={'help': 'modalities to load'})
+    modalities: Optional[List[str]] = field(default_factory=lambda: ["audio", "video", "skeleton"], metadata={'help': 'modalities to load'})
     is_s2s: bool=field(default=False, metadata={'help': 'seq2seq fine-tuning only'})
     tokenizer_bpe_name: Optional[str] = field(default=None, metadata={'help': 'tokenizer model name'})
     tokenizer_bpe_model: Optional[str] = field(default=None, metadata={'help': 'tokenizer model path'})

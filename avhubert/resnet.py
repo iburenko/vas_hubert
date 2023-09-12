@@ -6,11 +6,15 @@
 
 import logging
 import math
+import torch
 import torch.nn as nn
-import pdb
 
 
 logger = logging.getLogger(__name__)
+
+def conv1x1(in_planes, out_planes, stride=1):
+    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride,
+                     padding=0, bias=False)
 
 def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -67,9 +71,59 @@ class BasicBlock(nn.Module):
         out = self.bn2(out)
         if self.downsample is not None:
             residual = self.downsample(x)
-
+        logger.info(residual.shape)
+        logger.info(out.shape)
         out += residual
         out = self.relu2(out)
+
+        return out
+    
+
+class BasicBlock50(nn.Module):
+    expansion = 4
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, relu_type = 'relu' ):
+        super(BasicBlock50, self).__init__()
+
+        assert relu_type in ['relu','prelu']
+
+        self.conv1 = conv1x1(inplanes, planes, stride)
+        self.bn1 = nn.BatchNorm2d(planes)
+
+        if relu_type == 'relu':
+            self.relu1 = nn.ReLU(inplace=True)
+            self.relu2 = nn.ReLU(inplace=True)
+            self.relu3 = nn.ReLU(inplace=True)
+        elif relu_type == 'prelu':
+            self.relu1 = nn.PReLU(num_parameters=planes)
+            self.relu2 = nn.PReLU(num_parameters=planes)
+            self.relu3 = nn.PReLU(num_parameters=4*planes)
+        else:
+            raise Exception('relu type not implemented')
+
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = nn.BatchNorm2d(planes)
+
+        self.conv3 = conv1x1(planes, 4*planes)
+        self.bn3 = nn.BatchNorm2d(4*planes)
+        
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu1(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu2(out)
+        out = self.conv3(out)
+        out = self.bn3(out)
+        if self.downsample is not None:
+            residual = self.downsample(x)
+        out += residual
+        out = self.relu3(out)
 
         return out
 
@@ -128,18 +182,20 @@ class ResNet(nn.Module):
         x = x.view(x.size(0), -1)
         return x
 
+
 class ResEncoder(nn.Module):
     def __init__(self, relu_type, weights):
         super(ResEncoder, self).__init__()
         self.frontend_nout = 64
-        self.backend_out = 512
+        self.backend_out = 2048
         frontend_relu = nn.PReLU(num_parameters=self.frontend_nout) if relu_type == 'prelu' else nn.ReLU()
         self.frontend3D = nn.Sequential(
             nn.Conv3d(1, self.frontend_nout, kernel_size=(5, 7, 7), stride=(1, 2, 2), padding=(2, 3, 3), bias=False),
             nn.BatchNorm3d(self.frontend_nout),
             frontend_relu,
             nn.MaxPool3d( kernel_size=(1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1)))
-        self.trunk = ResNet(BasicBlock, [2, 2, 2, 2], relu_type=relu_type)
+        # self.trunk = ResNet(BasicBlock, [2, 2, 2, 2], relu_type=relu_type)
+        self.trunk = ResNet(BasicBlock50, [3,4,6,3], relu_type=relu_type)
         if weights is not None:
             logger.info(f"Load {weights} for resnet")
             std = torch.load(weights, map_location=torch.device('cpu'))['model_state_dict']

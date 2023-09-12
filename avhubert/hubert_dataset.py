@@ -58,13 +58,14 @@ def load_audio_visual(manifest_path, max_keep, min_keep, frame_rate, label_paths
                 n_short += 1
             elif max_keep is not None and sz > max_keep:
                 n_long += 1
-            elif (not is_seq_label) and (not is_audio_label_aligned(sz/frame_rate, dur_from_label_list[ind])):
-                n_unaligned += 1
+            # elif (not is_seq_label) and (not is_audio_label_aligned(sz/frame_rate, dur_from_label_list[ind])):
+            #     n_unaligned += 1
             else:
                 video_path = items[1]
-                audio_path = items[2]
+                audio_path = items[3]
+                keypoints_path = items[2]
                 audio_id = items[0]
-                names.append((video_path, audio_path+':'+audio_id))
+                names.append((video_path, keypoints_path, audio_path+':'+audio_id))
                 inds.append(ind)
                 sizes.append(sz)
     tot = ind + 1
@@ -119,22 +120,22 @@ def verify_label_lengths(
     for i, ind in enumerate(inds):
         dur_from_audio = audio_sizes[i] / audio_rate
         dur_from_label = lengths[i] / label_rate
-        if abs(dur_from_audio - dur_from_label) > tol:
-            logger.warning(
-                (
-                    f"audio and label duration differ too much "
-                    f"(|{dur_from_audio} - {dur_from_label}| > {tol}) "
-                    f"in line {ind+1} of {label_path}. Check if `label_rate` "
-                    f"is correctly set (currently {label_rate}). "
-                    f"num. of samples = {audio_sizes[i]}; "
-                    f"label length = {lengths[i]}"
-                )
-            )
-            num_invalid += 1
-    if num_invalid > 0:
-        logger.warning(
-            f"total {num_invalid} (audio, label) pairs with mismatched lengths"
-        )
+    #     if abs(dur_from_audio - dur_from_label) > tol:
+    #         logger.warning(
+    #             (
+    #                 f"audio and label duration differ too much "
+    #                 f"(|{dur_from_audio} - {dur_from_label}| > {tol}) "
+    #                 f"in line {ind+1} of {label_path}. Check if `label_rate` "
+    #                 f"is correctly set (currently {label_rate}). "
+    #                 f"num. of samples = {audio_sizes[i]}; "
+    #                 f"label length = {lengths[i]}"
+    #             )
+    #         )
+    #         num_invalid += 1
+    # if num_invalid > 0:
+    #     logger.warning(
+    #         f"total {num_invalid} (audio, label) pairs with mismatched lengths"
+    #     )
 
 
 class AVHubertDataset(FairseqDataset):
@@ -272,14 +273,16 @@ class AVHubertDataset(FairseqDataset):
                 feats = np.concatenate([feats, res], axis=0)
             feats = feats.reshape((-1, stack_order, feat_dim)).reshape(-1, stack_order*feat_dim)
             return feats
-        video_fn, audio_fn = mix_name
+        video_fn, keypoints_fn, audio_fn = mix_name
         if 'video' in self.modalities:
             video_feats = self.load_video(video_fn) # [T, H, W, 1]
         else:
             video_feats = None
         if 'audio' in self.modalities:
             audio_fn = audio_fn.split(':')[0]
-            sample_rate, wav_data = wavfile.read(audio_fn)
+            sample_rate, wav_data = wavfile.read(os.path.join(self.audio_root, audio_fn))
+            if len(wav_data.shape) == 2:
+                wav_data = np.mean(wav_data, axis=1)
             assert sample_rate == 16_000 and len(wav_data.shape) == 1
             if np.random.rand() < self.noise_prob:
                 wav_data = self.add_noise(wav_data)
@@ -287,13 +290,17 @@ class AVHubertDataset(FairseqDataset):
             audio_feats = stacker(audio_feats, self.stack_order_audio) # [T/stack_order_audio, F*stack_order_audio]
         else:
             audio_feats = None
+        if 'skeleton' in self.modalities:
+            keypoints_feats = np.load(os.path.join(self.audio_root,keypoints_fn))["arr_0"]
+        else:
+            keypoints_feats = None
         if audio_feats is not None and video_feats is not None:
             diff = len(audio_feats) - len(video_feats)
             if diff < 0:
                 audio_feats = np.concatenate([audio_feats, np.zeros([-diff, audio_feats.shape[-1]], dtype=audio_feats.dtype)])
             elif diff > 0:
                 audio_feats = audio_feats[:-diff]
-        return video_feats, audio_feats
+        return video_feats, keypoints_feats, audio_feats
 
     def load_video(self, audio_name):
         feats = custom_utils.load_video(os.path.join(self.audio_root, audio_name))
@@ -346,14 +353,33 @@ class AVHubertDataset(FairseqDataset):
         return mixed
 
     def __getitem__(self, index):
-        video_feats, audio_feats = self.load_feature(self.names[index])
-        audio_feats, video_feats = torch.from_numpy(audio_feats.astype(np.float32)) if audio_feats is not None else None, torch.from_numpy(video_feats.astype(np.float32)) if video_feats is not None else None
+        video_feats, keypoints_feats, audio_feats = self.load_feature(self.names[index])
+        if audio_feats is not None:
+            audio_feats = torch.from_numpy(audio_feats.astype(np.float32))
+        else:
+            audio_feats = None
+        if video_feats is not None:
+            video_feats = torch.from_numpy(video_feats.astype(np.float32))
+        else:
+            video_feats = None
+        if keypoints_feats is not None:
+            keypoints_feats = torch.from_numpy(keypoints_feats.astype(np.float32))
+            keypoints_feats = keypoints_feats.transpose(0,1)
+        else:
+            keypoints_feats = None
         if self.normalize and 'audio' in self.modalities:
             with torch.no_grad():
                 audio_feats = F.layer_norm(audio_feats, audio_feats.shape[1:])
         labels = self.get_labels(index)
-        fid = self.names[index][1].split(':')[1]
-        return {"id": index, 'fid': fid, "video_source": video_feats, 'audio_source': audio_feats, "label_list": labels}
+        fid = self.names[index][2].split(':')[1]
+        return {
+            "id": index, 
+            "fid": fid, 
+            "video_source": video_feats, 
+            "keypoints_source": keypoints_feats,
+            "audio_source": audio_feats, 
+            "label_list": labels
+            }
 
     def __len__(self):
         return len(self.sizes)
@@ -378,11 +404,15 @@ class AVHubertDataset(FairseqDataset):
         if len(samples) == 0:
             return {}
 
-        audio_source, video_source = [s["audio_source"] for s in samples], [s["video_source"] for s in samples]
+        audio_source = [s["audio_source"] for s in samples]
+        video_source = [s["video_source"] for s in samples]
+        keypoints_source = [s["keypoints_source"] for s in samples]
         if audio_source[0] is None:
             audio_source = None
         if video_source[0] is None:
             video_source = None
+        if keypoints_source[0] is None:
+            keypoints_source = None
         if audio_source is not None:
             audio_sizes = [len(s) for s in audio_source]
         else:
@@ -399,6 +429,8 @@ class AVHubertDataset(FairseqDataset):
             collated_videos, padding_mask, audio_starts = self.collater_audio(video_source, audio_size, audio_starts)
         else:
             collated_videos = None
+        if keypoints_source is not None:
+            collated_keypoints = torch.from_numpy(np.stack(keypoints_source))
         targets_by_label = [
             [s["label_list"][i] for s in samples]
             for i in range(self.num_labels)
@@ -406,7 +438,11 @@ class AVHubertDataset(FairseqDataset):
         targets_list, lengths_list, ntokens_list = self.collater_label(
             targets_by_label, audio_size, audio_starts
         )
-        source = {"audio": collated_audios, "video": collated_videos}
+        source = {
+            "audio": collated_audios, 
+            "video": collated_videos,
+            "keypoints": collated_keypoints
+            }
         net_input = {"source": source, "padding_mask": padding_mask}
         batch = {
             "id": torch.LongTensor([s["id"] for s in samples]),
