@@ -17,15 +17,15 @@ checkpoint:
 distributed_training:
   ddp_backend: no_c10d
   distributed_backend: 'nccl'
-  distributed_world_size: 32
+  distributed_world_size: 1
   distributed_port: 29671
-  nprocs_per_node: 8
+  nprocs_per_node: 1
 
 task:
   _name: av_hubert_pretraining
   data: ???
   label_dir: ???
-  labels: ["mfcc"]
+  labels: ["km"]
   label_rate: ${model.label_rate}
   sample_rate: 25
   max_sample_size: 500
@@ -39,8 +39,8 @@ task:
   image_aug: true
 
 dataset:
-  num_workers: 6
-  max_tokens: 1000
+  num_workers: 16
+  max_tokens: 1200
   skip_invalid_size_inputs_valid_test: true
   validate_interval: 5
   validate_interval_updates: 10000
@@ -64,10 +64,11 @@ optimizer:
 
 lr_scheduler:
   _name: polynomial_decay
-  warmup_updates: 32000
+  warmup_updates: 10
 
 model:
   _name: av_hubert
+  # input_modality: "image"
   label_rate: 100
   skip_masked: false
   skip_nomask: false

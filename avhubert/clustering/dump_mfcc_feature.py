@@ -15,6 +15,9 @@ import torchaudio
 import tqdm
 from npy_append_array import NpyAppendArray
 
+def LINE():
+    return sys._getframe(1).f_lineno
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -74,7 +77,10 @@ def get_path_iterator(tsv, nshard, rank):
 
         def iterate():
             for line in lines:
-                _, video_path, wav_path, nsample_video, nsample_wav = line.split("\t")
+                _, video_path, skeleton_path, wav_path, nsample_video, nsample_wav = line.split("\t")
+                logger.info(video_path)
+                logger.info(skeleton_path)
+                logger.info(wav_path)
                 yield f"{root}/{wav_path}", int(nsample_wav)
 
         return iterate, len(lines)
@@ -94,7 +100,8 @@ def dump_feature(tsv_dir, split, nshard, rank, feat_dir, sample_rate=16_000):
 
     feat_f = NpyAppendArray(feat_path)
     with open(leng_path, "w") as leng_f:
-        for path, nsample in tqdm.tqdm(iterator, total=num):
+        # for path, nsample in tqdm.tqdm(iterator, total=num):
+        for path, nsample in iterator:
             feat = reader.get_feats(path, nsample)
             feat_f.append(feat.cpu().numpy())
             leng_f.write(f"{len(feat)}\n")
@@ -102,6 +109,7 @@ def dump_feature(tsv_dir, split, nshard, rank, feat_dir, sample_rate=16_000):
 
 
 if __name__ == "__main__":
+    logger.info(LINE())
     import argparse
 
     parser = argparse.ArgumentParser()

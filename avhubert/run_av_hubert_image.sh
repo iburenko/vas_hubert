@@ -1,12 +1,12 @@
 #!/bin/bash -l
 
-#SBATCH --job-name=avh_image_audio
+#SBATCH --job-name=vashub_image_audio
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH -C a100_80  
 #SBATCH --gres=gpu:a100:8
 #SBATCH --time=24:00:00
-#SBATCH --signal=B:SIGUSR1@15
+#SBATCH --signal=B:SIGUSR1@120
 #SBATCH --export=NONE    
 
 unset SLURM_EXPORT_ENV
@@ -25,10 +25,9 @@ function sig_handler_USR1()
             rm semaphor/$output_dir_suffix/test$CLUSTER_ITER.ok
             # rm -rf $output_dir_suffix
         fi
-        exit 2
 }
 
-trap 'sig_handler_USR1' SIGTERM SIGUSR1
+trap 'sig_handler_USR1' SIGUSR1
 
 # cp $DATASET/ellen_show_datasets/ellen_2016_300_frames.tar $TMPDIR
 # cd $TMPDIR
@@ -36,7 +35,7 @@ trap 'sig_handler_USR1' SIGTERM SIGUSR1
 # cp /home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/valid.tsv $TMPDIR/ellen_degeneres_2016_all_data_300_frames
 # cp /home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/train.tsv $TMPDIR/ellen_degeneres_2016_all_data_300_frames
 
-cd /home/hpc/b105dc/b105dc10/av_hubert/avhubert
+cd /home/hpc/b105dc/b105dc10/vas_hubert/avhubert
 CLUSTER_ITER=$1
 RUN_ITER=$2
 
@@ -63,7 +62,7 @@ echo "cluster iter = "$CLUSTER_ITER
 echo "tokens = "$TOKENS
 echo "start av hubert"
 srun fairseq-hydra-train \
-    --config-dir /home/hpc/b105dc/b105dc10/av_hubert/avhubert/conf/pretrain \
+    --config-dir /home/hpc/b105dc/b105dc10/vas_hubert/avhubert/conf/pretrain \
     --config-name base_lrs3_iter$CLUSTER_ITER.yaml \
     task.data=/home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/data \
     task.label_dir=/home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/$output_dir_suffix/clusters_iter$CLUSTER_ITER \

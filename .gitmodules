@@ -1,3 +1,9 @@
 [submodule "fairseq"]
 	path = fairseq
 	url = https://github.com/pytorch/fairseq
+[submodule "avhubert/CVPR21Chal-SLR"]
+	path = avhubert/CVPR21Chal-SLR
+	url = git@github.com:jackyjsy/CVPR21Chal-SLR.git
+[submodule "avhubert/sl_gcn"]
+	path = avhubert/sl_gcn
+	url = git@github.com:iburenko/sl_gcn.git

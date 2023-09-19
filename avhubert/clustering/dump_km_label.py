@@ -76,7 +76,8 @@ def dump_label(feat_dir, split, km_path, nshard, rank, lab_dir):
     lab_path = f"{lab_dir}/{split}_{rank}_{nshard}.km"
     os.makedirs(lab_dir, exist_ok=True)
     with open(lab_path, "w") as f:
-        for feat in tqdm.tqdm(iterator, total=num):
+        # for feat in tqdm.tqdm(iterator, total=num):
+        for feat in iterator:
             # feat = torch.from_numpy(feat).cuda()
             lab = apply_kmeans(feat).tolist()
             f.write(" ".join(map(str, lab)) + "\n")

@@ -1,12 +1,12 @@
 #!/bin/bash -l
 
-#SBATCH --job-name=avh_image_skeleton_audio
+#SBATCH --job-name=vashub_image_skeleton_audio
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH -C a100_80  
 #SBATCH --gres=gpu:a100:8
 #SBATCH --time=24:00:00
-#SBATCH --signal=B:SIGUSR1@15
+#SBATCH --signal=B:SIGUSR1@120
 #SBATCH --export=NONE    
 
 unset SLURM_EXPORT_ENV
@@ -25,10 +25,9 @@ function sig_handler_USR1()
             rm semaphor/$output_dir_suffix/test$CLUSTER_ITER.ok
             # rm -rf $output_dir_suffix
         fi
-        exit 2
 }
 
-trap 'sig_handler_USR1' SIGTERM SIGUSR1
+trap 'sig_handler_USR1' SIGUSR1
 
 # cp $DATASET/ellen_show_datasets/ellen_2016_300_frames.tar $TMPDIR
 # cd $TMPDIR

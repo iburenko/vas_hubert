@@ -60,12 +60,14 @@ class HubertFeatureReader(object):
                 feats = np.concatenate([feats, res], axis=0)
             feats = feats.reshape((-1, stack_order, feat_dim)).reshape(-1, stack_order*feat_dim)
             return feats
-        video_fn, audio_fn = mix_name
+        video_fn, keypoints_fn, audio_fn = mix_name
         video_feats = self.load_image(video_fn)
-
+        keypoints_feats = np.load(keypoints_fn)["arr_0"]
+        # keypoints_feats = keypoints_feats[np.newaxis, ...]
         audio_fn = audio_fn.split(':')[0]
         sample_rate, wav_data = wavfile.read(audio_fn)
-        assert sample_rate == 16_000 and len(wav_data.shape) == 1
+        wav_data = wav_data.mean(axis=1)
+        assert sample_rate == 16000 and len(wav_data.shape) == 1
         audio_feats = logfbank(wav_data, samplerate=sample_rate).astype(np.float32)
         audio_feats = stacker(audio_feats, self.stack_order_audio)
 
@@ -74,7 +76,7 @@ class HubertFeatureReader(object):
             audio_feats = np.concatenate([audio_feats, np.zeros([-diff, audio_feats.shape[-1]], dtype=audio_feats.dtype)])
         elif diff > 0:
             audio_feats = audio_feats[:-diff]
-        return video_feats, audio_feats
+        return video_feats, keypoints_feats, audio_feats
 
     def load_image(self, audio_name):
         feats = self.custom_utils.load_video(audio_name)
@@ -83,14 +85,21 @@ class HubertFeatureReader(object):
         return feats
 
     def get_feats(self, path, ref_len=None):
-        video_feats, audio_feats = self.load_feature(path, ref_len)
+        video_feats, keypoints_feats, audio_feats = self.load_feature(path, ref_len)
         with torch.no_grad():
-            audio_feats, video_feats = torch.from_numpy(audio_feats.astype(np.float32)).cuda(), torch.from_numpy(video_feats.astype(np.float32)).cuda()
+            audio_feats = torch.from_numpy(audio_feats.astype(np.float32)).cuda()
+            video_feats = torch.from_numpy(video_feats.astype(np.float32)).cuda()
+            keypoints_feats = torch.from_numpy(keypoints_feats.astype(np.float32)).cuda()
             if self.task.cfg.normalize:
                 audio_feats = F.layer_norm(audio_feats, audio_feats.shape[1:])
             video_feats = video_feats.unsqueeze(dim=0).permute((0, 4, 1, 2, 3)).contiguous()
             audio_feats = audio_feats.unsqueeze(dim=0).transpose(1, 2)
-            source = {'audio': audio_feats, 'video': video_feats}
+            keypoints_feats = keypoints_feats.transpose(0,1).unsqueeze(0)
+            source = {
+                'audio': audio_feats, 
+                'video': video_feats, 
+                'keypoints': keypoints_feats
+                }
             if self.layer == 0:
                 ret_conv, output_layer = True, None
             else:
@@ -123,9 +132,8 @@ def get_path_iterator(tsv, nshard, rank):
 
         def iterate():
             for line in lines:
-                items = line.strip().split("\t")
-                # audio_path = f"{items[1]}:{items[0]}"
-                yield (items[1], items[2]+':'+items[0]), int(items[3])
+                items = line.split("\t")
+                yield (os.path.join(root, items[1]), os.path.join(root, items[2]), os.path.join(root, items[3])+':'+items[0]), int(items[4])
 
         return iterate, len(lines)
 
@@ -146,7 +154,8 @@ def dump_feature(
 
     feat_f = NpyAppendArray(feat_path)
     with open(leng_path, "w") as leng_f:
-        for path, nsample in tqdm.tqdm(iterator, total=num):
+        # for path, nsample in tqdm.tqdm(iterator, total=num):
+        for path, nsample in iterator:
             feat = reader.get_feats(path, nsample)
             feat_f.append(feat.cpu().numpy())
             leng_f.write(f"{len(feat)}\n")

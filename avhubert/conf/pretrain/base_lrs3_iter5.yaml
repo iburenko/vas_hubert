@@ -17,9 +17,9 @@ checkpoint:
 distributed_training:
   ddp_backend: no_c10d
   distributed_backend: 'nccl'
-  distributed_world_size: 32
+  distributed_world_size: 1
   distributed_port: 29671
-  nprocs_per_node: 8
+  nprocs_per_node: 1
 
 task:
   _name: av_hubert_pretraining
@@ -39,8 +39,8 @@ task:
   image_aug: true
 
 dataset:
-  num_workers: 6
-  max_tokens: 1000
+  num_workers: 16
+  max_tokens: 1200
   skip_invalid_size_inputs_valid_test: true
   validate_interval: 5
   validate_interval_updates: 10000

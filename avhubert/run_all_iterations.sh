@@ -9,7 +9,8 @@ function iteration_step() {
     else
         ckpt_path="/home/atuin/b105dc/data/work/iburenko/av_hubert/results/$output_dir_suffix/checkpoints/checkpoint_best.pt"
     fi
-    if (( $CLUSTER_ITER > 2 )); then
+    if (( $CLUSTER_ITER > 3 & $RUN_ITER < 2)); then
+    # if [[ $modality != "image_skeleton" ]]; then
         python submit_cluster.py \
                 --tsv /home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/data \
                 --output /home/atuin/b105dc/data/datasets/ellen_show_datasets/av_hubert_clusters/300_frames/$output_dir_suffix/clusters_iter$CLUSTER_ITER \
@@ -38,12 +39,12 @@ N_CLUSTER=100
 USE_MFCC=True
 
 if [[ $modality == "image_skeleton" ]]; then
-    CLUSTER_ITER=3
-    RUN_ITER=1
+    CLUSTER_ITER=4
+    RUN_ITER=2
     USE_MFCC=False
 else
-    CLUSTER_ITER=2
-    RUN_ITER=2
+    CLUSTER_ITER=4
+    RUN_ITER=1
     USE_MFCC=False
 fi
 

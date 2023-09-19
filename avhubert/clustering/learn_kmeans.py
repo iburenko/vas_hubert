@@ -50,6 +50,8 @@ def get_km_model(
 def load_feature_shard(feat_dir, split, nshard, rank, percent):
     feat_path = f"{feat_dir}/{split}_{rank}_{nshard}.npy"
     leng_path = f"{feat_dir}/{split}_{rank}_{nshard}.len"
+    logger.info(feat_path)
+    logger.info(leng_path)
     with open(leng_path, "r") as f:
         lengs = [int(line.rstrip()) for line in f]
         offsets = [0] + np.cumsum(lengs[:-1]).tolist()
